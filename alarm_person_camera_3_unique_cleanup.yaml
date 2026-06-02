@@ -1,6 +1,6 @@
 blueprint:
-  name: Cảnh báo camera AI - Unique Context v3
-  author: TriTue2011
+  name: Cảnh báo camera AI - Unique Context v4
+  author: TriTue2011 - chucuoi8x edid
   homeassistant:
     min_version: 2025.7.0
   description: "Phân tích sự kiện camera bằng AI Task (Structured Output) HOẶC JSON
@@ -150,7 +150,7 @@ blueprint:
           description: "\U0001F449 Số ảnh sẽ chụp liên tiếp để so sánh và gửi cho
             AI phân tích.\n✅ Nhiều ảnh giúp AI phân tích chính xác hơn nhưng mất nhiều
             thời gian hơn.\n"
-          default: 3
+          default: 1
           selector:
             number:
               min: 1.0
@@ -955,7 +955,7 @@ actions:
             instructions: >-
               Request ID: {{ context.id }}.
               Snapshot prefix: {{ file_path_dynamic }}.
-              Attached snapshots JSON: {{ snapshots_json }}.
+              Attached snapshot: media-source://media_source/local/snapshots/{{ file_path_dynamic }}_snapshot1.jpg.
               Đây là lần phân tích mới, độc lập với mọi lần chạy trước.
               Chỉ phân tích các ảnh snapshot được đính kèm trong chính request này.
               Không sử dụng, không lặp lại, không tham chiếu mô tả, kết quả, trí nhớ hoặc ngữ cảnh từ các lần phân tích trước.
@@ -1027,7 +1027,7 @@ actions:
             instructions: >-
               Request ID: {{ context.id }}.
               Snapshot prefix: {{ file_path_dynamic }}.
-              Attached snapshots JSON: {{ snapshots_json }}.
+              Attached snapshot: media-source://media_source/local/snapshots/{{ file_path_dynamic }}_snapshot1.jpg.
               Đây là lần phân tích mới, độc lập với mọi lần chạy trước.
               Chỉ phân tích các ảnh snapshot được đính kèm trong chính request này.
               Không sử dụng, không lặp lại, không tham chiếu mô tả, kết quả, trí nhớ hoặc ngữ cảnh từ các lần phân tích trước.
@@ -1037,7 +1037,9 @@ actions:
 
               {{ ai_task_instructions }}
             entity_id: '{{ ai_provider if ai_provider | length > 0 else omit }}'
-            attachments: '{{ snapshots_json | from_json }}'
+            attachments:
+              - media_content_id: media-source://media_source/local/snapshots/{{ file_path_dynamic }}_snapshot1.jpg
+                media_content_type: image/jpeg
           response_variable: humans_detected_report_raw
         - variables:
             humans_detected_report: "{% if humans_detected_report_raw is defined\n
