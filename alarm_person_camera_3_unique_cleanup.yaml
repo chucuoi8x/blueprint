@@ -1,6 +1,6 @@
 blueprint:
-  name: Cảnh báo camera AI - Unique AI Context
-  author: TriTue2011 - Linh edit
+  name: Cảnh báo camera AI - Unique AI Context v2
+  author: TriTue2011 - chucuoi8x edit
   homeassistant:
     min_version: 2025.7.0
   description: "Phân tích sự kiện camera bằng AI Task (Structured Output) HOẶC JSON
@@ -831,11 +831,19 @@ actions:
       - delay:
           seconds: '{{ num_delay }}'
 - variables:
-    snapshots_url: "{% set snap_count = num_snapshots | int %} {% set camera = file_path_dynamic
-      %} {% set ns = namespace(images=[]) %} {%- for i in range(1, snap_count + 1)
-      -%}\n  {% set ns.images = ns.images + [{\n    'media_content_id': 'media-source://media_source/local/snapshots/'
-      ~ camera ~ '_snapshot' ~ i ~ '.jpg',\n    'media_content_type': 'image/jpeg'\n
-      \ }] %}\n{%- endfor -%} {{ ns.images }}\n"
+    # Danh sách attachment được dựng thành JSON rồi from_json khi gọi ai_task.
+    # Cách này tránh trường hợp HA render list thành chuỗi YAML/Python khiến ai_task dùng sai/cached attachment.
+    snapshots_json: >-
+      {% set snap_count = num_snapshots | int %}
+      {% set camera = file_path_dynamic %}
+      {% set ns = namespace(images=[]) %}
+      {%- for i in range(1, snap_count + 1) -%}
+        {% set ns.images = ns.images + [{
+          'media_content_id': 'media-source://media_source/local/snapshots/' ~ camera ~ '_snapshot' ~ i ~ '.jpg',
+          'media_content_type': 'image/jpeg'
+        }] %}
+      {%- endfor -%}
+      {{ ns.images | to_json }}
     snapshot_first: /media/local/snapshots/{{ file_path_dynamic }}_snapshot1.jpg
 - choose:
   - conditions:
@@ -942,9 +950,10 @@ actions:
         sequence:
         - action: ai_task.generate_data
           data:
-            task_name: "Phan tich anh khi co chuyen dong {{ context.id }}"
+            task_name: "Phan tich anh {{ file_path_dynamic }} {{ now().timestamp() }}"
             instructions: >-
               Request ID: {{ context.id }}.
+              Snapshot prefix: {{ file_path_dynamic }}.
               Đây là lần phân tích mới, độc lập với mọi lần chạy trước.
               Chỉ phân tích các ảnh snapshot được đính kèm trong chính request này.
               Không sử dụng, không lặp lại, không tham chiếu mô tả, kết quả, trí nhớ hoặc ngữ cảnh từ các lần phân tích trước.
@@ -954,7 +963,7 @@ actions:
 
               {{ ai_task_instructions }}
             entity_id: '{{ ai_provider if ai_provider | length > 0 else omit }}'
-            attachments: '{{ snapshots_url }}'
+            attachments: '{{ snapshots_json | from_json }}'
             structure:
               humans_detected:
                 description: 'Tổng số người đếm được trong chuỗi ảnh (số nguyên ≥
@@ -1010,9 +1019,10 @@ actions:
         sequence:
         - action: ai_task.generate_data
           data:
-            task_name: "Phan tich anh khi co chuyen dong {{ context.id }}"
+            task_name: "Phan tich anh {{ file_path_dynamic }} {{ now().timestamp() }}"
             instructions: >-
               Request ID: {{ context.id }}.
+              Snapshot prefix: {{ file_path_dynamic }}.
               Đây là lần phân tích mới, độc lập với mọi lần chạy trước.
               Chỉ phân tích các ảnh snapshot được đính kèm trong chính request này.
               Không sử dụng, không lặp lại, không tham chiếu mô tả, kết quả, trí nhớ hoặc ngữ cảnh từ các lần phân tích trước.
@@ -1022,7 +1032,7 @@ actions:
 
               {{ ai_task_instructions }}
             entity_id: '{{ ai_provider if ai_provider | length > 0 else omit }}'
-            attachments: '{{ snapshots_url }}'
+            attachments: '{{ snapshots_json | from_json }}'
           response_variable: humans_detected_report_raw
         - variables:
             humans_detected_report: "{% if humans_detected_report_raw is defined\n
