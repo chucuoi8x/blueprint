@@ -965,7 +965,9 @@ actions:
 
               {{ ai_task_instructions }}
             entity_id: '{{ ai_provider if ai_provider | length > 0 else omit }}'
-            attachments: '{{ snapshots_json | from_json }}'
+            attachments:
+              - media_content_id: media-source://media_source/local/snapshots/{{ file_path_dynamic }}_snapshot1.jpg
+                media_content_type: image/jpeg
             structure:
               humans_detected:
                 description: 'Tổng số người đếm được trong chuỗi ảnh (số nguyên ≥
