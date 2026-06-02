@@ -1,6 +1,6 @@
 blueprint:
   name: Cảnh báo camera AI - Unique AI Context
-  author: TriTue2011
+  author: TriTue2011 - Linh edit
   homeassistant:
     min_version: 2025.7.0
   description: "Phân tích sự kiện camera bằng AI Task (Structured Output) HOẶC JSON
