@@ -1,5 +1,5 @@
 blueprint:
-  name: Cảnh báo camera AI
+  name: Cảnh báo camera AI - Unique AI Context
   author: TriTue2011
   homeassistant:
     min_version: 2025.7.0
@@ -187,7 +187,7 @@ blueprint:
           description: "\U0001F449 Bật để ghi đè ảnh cũ bằng ảnh mới (tiết kiệm dung
             lượng).\n⚠️ Tắt sẽ lưu nhiều ảnh riêng biệt theo context.id — tốn dung
             lượng.\n✅ Ảnh luôn được lưu vào /media/snapshots/ (Media Folder, bảo mật).\n"
-          default: true
+          default: false
           selector:
             boolean: {}
     ai_task_section:
@@ -809,8 +809,10 @@ actions:
               seconds: '{{ max_wait_time }}'
             continue_on_timeout: true
 - variables:
-    file_path_dynamic: '{{ camera_file_path }}_{{ context.id }}'
-
+    # Luôn dùng tên file unique theo context.id để tránh HA/media-source/AI task cache ảnh cũ.
+    # Input Overwrite Image được giữ lại để tương thích blueprint cũ nhưng không còn dùng cho filename.
+    file_path_dynamic: >-
+      {{ camera_file_path }}_{{ context.id }}
 - delay:
     seconds: '{{ num_delay_before_snapshot }}'
 - repeat:
@@ -940,8 +942,17 @@ actions:
         sequence:
         - action: ai_task.generate_data
           data:
-            task_name: Phan tich anh khi co chuyen dong
-            instructions: '{{ ai_task_instructions }}'
+            task_name: "Phan tich anh khi co chuyen dong {{ context.id }}"
+            instructions: >-
+              Request ID: {{ context.id }}.
+              Đây là lần phân tích mới, độc lập với mọi lần chạy trước.
+              Chỉ phân tích các ảnh snapshot được đính kèm trong chính request này.
+              Không sử dụng, không lặp lại, không tham chiếu mô tả, kết quả, trí nhớ hoặc ngữ cảnh từ các lần phân tích trước.
+              Chỉ mô tả những gì nhìn thấy rõ trong ảnh hiện tại.
+              Không suy đoán hành động như nấu ăn, đi ra ngoài, cầm vật nguy hiểm nếu không nhìn thấy rõ.
+              Nếu người đứng hoặc ngồi gần khu vực bếp nhưng không thấy thao tác nấu ăn rõ ràng, chỉ nói là đang đứng/ngồi gần khu vực bếp.
+
+              {{ ai_task_instructions }}
             entity_id: '{{ ai_provider if ai_provider | length > 0 else omit }}'
             attachments: '{{ snapshots_url }}'
             structure:
@@ -999,8 +1010,17 @@ actions:
         sequence:
         - action: ai_task.generate_data
           data:
-            task_name: Phan tich anh khi co chuyen dong
-            instructions: '{{ ai_task_instructions }}'
+            task_name: "Phan tich anh khi co chuyen dong {{ context.id }}"
+            instructions: >-
+              Request ID: {{ context.id }}.
+              Đây là lần phân tích mới, độc lập với mọi lần chạy trước.
+              Chỉ phân tích các ảnh snapshot được đính kèm trong chính request này.
+              Không sử dụng, không lặp lại, không tham chiếu mô tả, kết quả, trí nhớ hoặc ngữ cảnh từ các lần phân tích trước.
+              Chỉ mô tả những gì nhìn thấy rõ trong ảnh hiện tại.
+              Không suy đoán hành động như nấu ăn, đi ra ngoài, cầm vật nguy hiểm nếu không nhìn thấy rõ.
+              Nếu người đứng hoặc ngồi gần khu vực bếp nhưng không thấy thao tác nấu ăn rõ ràng, chỉ nói là đang đứng/ngồi gần khu vực bếp.
+
+              {{ ai_task_instructions }}
             entity_id: '{{ ai_provider if ai_provider | length > 0 else omit }}'
             attachments: '{{ snapshots_url }}'
           response_variable: humans_detected_report_raw
@@ -1270,14 +1290,6 @@ actions:
               ttl: !input zalo_custom_ttl
 - delay:
     seconds: '{{ num_delay_actions }}'
-- alias: Xoa anh snapshot cua lan chay nay sau khi da xu ly xong
-  continue_on_error: true
-  action: shell_command.delete_ai_camera_snapshots
-  data:
-    file_prefix: '{{ file_path_dynamic }}'
-- alias: Don dep anh snapshot cu hon 10 phut de tranh day dung luong
-  continue_on_error: true
-  action: shell_command.cleanup_old_ai_camera_snapshots
 - delay: !input cooldown
 conditions:
 - condition: and
