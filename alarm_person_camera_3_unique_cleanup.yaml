@@ -1,0 +1,1284 @@
+blueprint:
+  name: Cảnh báo camera AI
+  author: TriTue2011
+  homeassistant:
+    min_version: 2025.7.0
+  description: "Phân tích sự kiện camera bằng AI Task (Structured Output) HOẶC JSON
+    (OpenAI/raw). Gửi thông báo với ảnh và phân tích AI qua điện thoại, Telegram,
+    Zalo và TTS ra loa.\n<details> <summary><b>Chi tiết:</b> - Nhấn để mở rộng</summary>\n\n
+    \ **Phiên bản: v.2025.10.22 - Full 6 Cases Edition (fix UndefinedError animals_detected)**\n\n
+    \ **Tác giả gốc: TriTue2011**\n\n  **Tính năng:**\n\n    1- **Hai chế độ AI:**
+    Structured Output (HA native ai_task) hoặc JSON (OpenAI/raw JSON response).\n\n
+    \   2- **6 trường hợp prompt đầy đủ:** JSON×3 (humans / animals / both) + Structured×3
+    (humans / animals / both).\n\n    3- **Gửi thông báo ngay lập tức** với ảnh, sau
+    đó cập nhật kết quả phân tích AI (2 bước).\n\n    4- **Hỗ trợ đa nền tảng:** Mobile
+    App (Android/iOS), Telegram, Zalo Bot (Pyscript), Zalo Custom Integration, TTS
+    ra loa.\n\n    5- **Phát hiện người và/hoặc động vật** (chó, mèo, chim) — lọc
+    báo động ảo.\n\n    6- **Tùy chọn chờ người** bằng occupancy sensor trước khi
+    phân tích.\n\n    7- **Cooldown** để tránh spam thông báo.\n\n    8- **continue_on_error**
+    cho tất cả action gửi thông báo (HA 2026.3+).\n\n  **Thay đổi so với phiên bản
+    cũ:**\n    - Prompt JSON: Tách riêng 3 nhánh humans/animals/both, mỗi nhánh có
+    field_rules đầy đủ và chính xác.\n    - Prompt Structured: Tách riên 3 nhánh,
+    bổ sung hướng di chuyển (đi vào/đi ra/ngang), cảnh báo vật nguy hiểm, ghi chú
+    phương tiện.\n    - ai_structure_description_humans và animals đồng bộ hoàn toàn
+    theo detect_subjects.\n    - Chuỗi fallback khớp chính xác với bộ lọc filter phrases.\n\n</details>\n<details>
+    <summary><b>⚙️ Yêu cầu cấu hình:</b> - Nhấn để mở rộng</summary>\n\n  **Thêm vào
+    `configuration.yaml` để HA nhận diện đúng thư mục media:**\n\n  ```yaml\n  homeassistant:\n
+    \   media_dirs:\n      local: /media\n  ```\n\n  ⚠️ Nếu thiếu dòng này, AI Task
+    và mobile notification có thể không truy cập được ảnh.\n\n</details>\n"
+  domain: automation
+  source_url: https://github.com/TriTue2011/Blueprint/blob/main/alarm_person_camera_3.yaml
+  input:
+    trigger_section:
+      name: Trigger Settings
+      icon: mdi:play-circle
+      input:
+        trigger_sensor:
+          name: "\U0001F6B6 Trigger Sensor"
+          description: "\U0001F449 Cảm biến kích hoạt automation (cửa, motion sensor).\n✅
+            Có thể chọn nhiều sensor cùng lúc.\n"
+          selector:
+            entity:
+              filter:
+              - domain:
+                - binary_sensor
+              multiple: true
+              reorder: false
+        trigger_from_state:
+          name: "\U0001F504 Trigger From State"
+          description: Trạng thái ban đầu của cảm biến trước khi kích hoạt.
+          default: 'off'
+          selector:
+            select:
+              options:
+              - 'off'
+              - 'on'
+              custom_value: true
+              multiple: false
+              sort: false
+        trigger_to_state:
+          name: "\U0001F504 Trigger To State"
+          description: Trạng thái mà cảm biến chuyển sang để kích hoạt automation.
+          default: 'on'
+          selector:
+            select:
+              options:
+              - 'on'
+              - 'off'
+              custom_value: true
+              multiple: false
+              sort: false
+        person_occupancy_sensor:
+          name: "\U0001F9CD Person Occupancy Sensor (Optional)"
+          description: "\U0001F449 Sensor phát hiện người (ví dụ: mmWave, PIR zone).\n⚠️
+            Dùng kết hợp với \"Wait for Person Detection\" bên dưới.\n✅ Nếu không
+            dùng, bỏ trống.\n"
+          default: []
+          selector:
+            entity:
+              filter:
+              - domain:
+                - binary_sensor
+              multiple: false
+              reorder: false
+        person_detected_state:
+          name: "\U0001F50E Person Detected State"
+          description: Trạng thái của sensor khi phát hiện có người.
+          default: 'on'
+          selector:
+            select:
+              options:
+              - 'on'
+              - 'off'
+              custom_value: true
+              multiple: false
+              sort: false
+        wait_for_person:
+          name: ⏳ Wait for Person Detection
+          description: "\U0001F449 Bật để đợi sensor phát hiện người TRƯỚC KHI chụp
+            ảnh và phân tích.\n✅ Giúp giảm ảnh chụp khi chưa có người trong khung
+            hình.\n"
+          default: false
+          selector:
+            boolean: {}
+        max_wait_time:
+          name: ⌛ Maximum Wait Time (Optional)
+          description: "\U0001F449 Thời gian tối đa (giây) để đợi phát hiện người.\n⚠️
+            Đặt 0 = chờ không giới hạn cho đến khi phát hiện người.\n"
+          default: 0
+          selector:
+            number:
+              min: 0.0
+              max: 3600.0
+              unit_of_measurement: seconds
+              mode: box
+              step: 1.0
+    run_conditions:
+      name: "\U0001F6E0️ Run Conditions"
+      description: "\U0001F449 Thêm Condition để chạy Automation.\n⚠️ Tất cả điều
+        kiện phải đúng thì automation mới chạy.\n"
+      default: []
+      selector:
+        condition: {}
+    cooldown:
+      name: ⏱️ Cooldown
+      description: "\U0001F449 Thời gian chờ SAU KHI automation chạy xong trước khi
+        có thể chạy lại.\n✅ Giúp tránh spam thông báo khi sensor liên tục kích hoạt.\n"
+      default:
+        minutes: 10
+      selector:
+        duration:
+          enable_second: true
+    camera_sensor_section:
+      name: Camera & Snapshot Settings
+      icon: mdi:camera
+      input:
+        camera_entities:
+          name: "\U0001F4F8 Camera Entities"
+          description: "\U0001F449 Danh sách camera để giám sát.\n⚠️ Hiện tại chỉ
+            sử dụng camera đầu tiên trong danh sách để chụp ảnh.\n"
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+              - domain:
+                - camera
+              reorder: false
+        num_snapshots:
+          name: ⌛ Number of Snapshots
+          description: "\U0001F449 Số ảnh sẽ chụp liên tiếp để so sánh và gửi cho
+            AI phân tích.\n✅ Nhiều ảnh giúp AI phân tích chính xác hơn nhưng mất nhiều
+            thời gian hơn.\n"
+          default: 3
+          selector:
+            number:
+              min: 1.0
+              max: 5.0
+              step: 1.0
+              unit_of_measurement: snapshots
+              mode: slider
+        num_delay_before_snapshot:
+          name: ⌛ Delay Before First Snapshot
+          description: "\U0001F449 Thời gian chờ (giây) TRƯỚC KHI chụp ảnh đầu tiên.\n✅
+            Giúp camera ổn định sau khi trigger kích hoạt.\n"
+          default: 1
+          selector:
+            number:
+              min: 0.0
+              max: 10.0
+              step: 0.5
+              unit_of_measurement: seconds
+              mode: slider
+        num_delay:
+          name: ⌛ Delay Between Snapshots
+          description: "\U0001F449 Thời gian trễ (giây) GIỮA các lần chụp ảnh.\n✅
+            Giúp chụp được ảnh ở các thời điểm khác nhau để AI so sánh.\n"
+          default: 1
+          selector:
+            number:
+              min: 0.0
+              max: 10.0
+              step: 0.5
+              unit_of_measurement: seconds
+              mode: slider
+        overwrite_image:
+          name: "\U0001F3DE️ Overwrite Image (Optional)"
+          description: "\U0001F449 Bật để ghi đè ảnh cũ bằng ảnh mới (tiết kiệm dung
+            lượng).\n⚠️ Tắt sẽ lưu nhiều ảnh riêng biệt theo context.id — tốn dung
+            lượng.\n✅ Ảnh luôn được lưu vào /media/snapshots/ (Media Folder, bảo mật).\n"
+          default: true
+          selector:
+            boolean: {}
+    ai_task_section:
+      name: AI Task Settings
+      icon: mdi:brain
+      collapsed: true
+      input:
+        ai_powered:
+          name: ✅ AI-powered (Optional)
+          description: "\U0001F449 Bật để dùng AI phân tích ảnh trước khi gửi thông
+            báo.\n⚠️ Nếu tắt, sẽ gửi thông báo ngay khi phát hiện chuyển động mà không
+            phân tích.\n✅ Khuyến nghị bật để lọc báo động ảo.\n"
+          default: true
+          selector:
+            boolean: {}
+        ai_mode:
+          name: "\U0001F916 AI Output Mode"
+          description: "\U0001F449 Chọn cách AI trả về kết quả phân tích ảnh.\n✅ Structured
+            Output: dùng ai_task native của HA (khuyến nghị, ổn định hơn).\n✅ JSON:
+            dùng cho OpenAI hoặc AI trả về raw JSON — cần parse thủ công.\n⚠️ Nếu
+            chọn JSON, hãy đảm bảo AI provider hỗ trợ trả về đúng định dạng JSON.\n"
+          default: structured
+          selector:
+            select:
+              options:
+              - label: Structured Output (HA Native - Khuyến nghị)
+                value: structured
+              - label: JSON (OpenAI / Raw JSON)
+                value: json
+              multiple: false
+              custom_value: false
+              sort: false
+        detect_subjects:
+          name: "\U0001F50D Phát hiện đối tượng"
+          description: "\U0001F449 Chọn loại đối tượng muốn AI phân tích và gửi cảnh
+            báo.\n✅ Chỉ người: cảnh báo khi phát hiện con người trong ảnh.\n✅ Chỉ
+            động vật: cảnh báo khi phát hiện chó, mèo hoặc chim trong ảnh.\n✅ Cả hai:
+            cảnh báo khi phát hiện người HOẶC động vật.\n⚠️ Lựa chọn này ảnh hưởng
+            trực tiếp đến prompt gửi cho AI và điều kiện lọc thông báo.\n"
+          default: humans
+          selector:
+            select:
+              options:
+              - label: "\U0001F464 Chỉ phát hiện người"
+                value: humans
+              - label: "\U0001F43E Chỉ phát hiện động vật (chó, mèo, chim)"
+                value: animals
+              - label: "\U0001F464\U0001F43E Phát hiện cả người và động vật"
+                value: both
+              multiple: false
+              custom_value: false
+              sort: false
+        ai_provider:
+          name: "\U0001F916 AI Task Provider"
+          description: "\U0001F449 Chọn AI Task provider để phân tích ảnh.\n✅ Bỏ trống
+            để dùng AI provider mặc định của hệ thống (HA 2025.7+).\n"
+          default: []
+          selector:
+            entity:
+              domain:
+              - ai_task
+              multiple: false
+              reorder: false
+    notification_section:
+      name: Mobile App Notify Settings
+      icon: mdi:bell
+      collapsed: true
+      input:
+        include_notify:
+          name: ✅ Mobile App Notify Option (Optional)
+          description: "\U0001F449 Bật nếu muốn gửi thông báo lên điện thoại đã cài
+            HA Companion App.\n"
+          default: false
+          selector:
+            boolean: {}
+        is_ios_android:
+          name: "\U0001F514 Android or iOS device?"
+          description: "\U0001F449 Chọn hệ điều hành của điện thoại nhận thông báo.\n"
+          default: android_device
+          selector:
+            select:
+              options:
+              - label: Android
+                value: android_device
+              - label: iOS
+                value: ios_device
+              multiple: false
+              custom_value: false
+              sort: false
+        notify_device:
+          name: "\U0001F4F1 Devices Notified"
+          description: "\U0001F449 Chọn điện thoại muốn nhận thông báo đẩy.\n✅ Có
+            thể chọn nhiều điện thoại.\n"
+          default: []
+          selector:
+            device:
+              filter:
+              - integration: mobile_app
+              multiple: true
+        notify_title:
+          name: "\U0001F4DD Title"
+          description: "\U0001F449 Tiêu đề của thông báo.\n"
+          default: "\U0001F514 <b><span style=\"color: red\">Có chuyển động</span></b>\n"
+          selector:
+            text:
+              multiline: false
+              multiple: false
+        tap_navigate:
+          name: "\U0001F4F2 Tap Navigate"
+          description: "\U0001F449 Mở HA và đi đến vị trí này khi nhấn vào thông báo.\n"
+          default: /lovelace/camera
+          selector:
+            text:
+              multiline: false
+              multiple: false
+        status_bar_icon:
+          name: "\U0001F320 Status Bar Icon (Android)"
+          description: "\U0001F449 Dành cho Android - Thiết lập icon cho thông báo
+            trên Status Bar.\n"
+          default: mdi:motion-sensor
+          selector:
+            icon: {}
+        notification_color:
+          name: "\U0001F3A8 Notification Color (Android)"
+          description: "\U0001F449 Dành cho Android - Màu của icon thông báo trên
+            Status Bar."
+          default:
+          - 255
+          - 0
+          - 0
+          selector:
+            color_rgb: {}
+        notification_time:
+          name: "\U0001F552 Notification Time"
+          description: "\U0001F449 Tùy chọn hiển thị thời gian trong nội dung thông
+            báo."
+          default: ''
+          selector:
+            select:
+              options:
+              - label: No Time Added
+                value: ''
+              - label: 12 Hour
+                value: at {{ now().strftime('%-I:%M %p') }}
+              - label: 24 Hour
+                value: at {{ now().strftime('%H:%M') }}
+              multiple: false
+              custom_value: false
+              sort: false
+    telegram_section:
+      name: Telegram Settings
+      icon: mdi:send
+      collapsed: true
+      input:
+        include_telegram_notify:
+          name: ✅ Telegram Option (Optional)
+          description: "\U0001F449 Bật nếu muốn gửi thông báo lên Telegram.\n"
+          default: false
+          selector:
+            boolean: {}
+        telegram_config_entry:
+          name: "\U0001F916 Telegram Bot"
+          description: "\U0001F449 Chọn Telegram Bot đã cấu hình trong HA."
+          default: ''
+          selector:
+            config_entry:
+              integration: telegram_bot
+        telegram_target:
+          name: "\U0001F9D1‍\U0001F4BB Target Chat ID"
+          description: "\U0001F449 Chat ID của người hoặc nhóm nhận thông báo.\n✅
+            Bỏ trống để dùng chat ID mặc định của bot.\n"
+          default: ''
+          selector:
+            text:
+              multiline: false
+              multiple: false
+        telegram_thread_id:
+          name: "\U0001F9F5 Thread ID (Optional)"
+          description: "\U0001F449 ID của chủ đề trong nhóm Telegram (nếu dùng nhóm
+            có topic).\n✅ Bỏ trống nếu không dùng topic.\n"
+          default: ''
+          selector:
+            text:
+              multiline: false
+              multiple: false
+        telegram_initial_caption:
+          name: "\U0001F4DD Initial Caption"
+          description: "\U0001F449 Caption gửi kèm ảnh ban đầu (trước khi có kết quả
+            AI)."
+          default: "\U0001F514 Phát hiện chuyển động!"
+          selector:
+            text:
+              multiline: false
+              multiple: false
+    zalo_bot_section:
+      name: Zalo Bot Settings (Pyscript)
+      icon: mdi:chat
+      collapsed: true
+      input:
+        enable_zalo_bot:
+          name: ✅ Enable Zalo Bot (Pyscript)
+          description: "\U0001F449 Bật/tắt gửi thông báo qua Zalo Bot dùng Pyscript.\n"
+          default: false
+          selector:
+            boolean: {}
+        zalo_bot_chat_id:
+          name: "\U0001F9D1‍\U0001F4BB Zalo Bot Chat ID"
+          description: "\U0001F449 Chat ID hoặc User ID nhận thông báo Zalo Bot qua
+            Pyscript."
+          default: ''
+          selector:
+            text:
+              multiline: false
+              multiple: false
+        zalo_bot_initial_caption:
+          name: "\U0001F4DD Zalo Bot Initial Caption"
+          description: "\U0001F449 Caption khi gửi ảnh ban đầu qua Zalo Bot."
+          default: "\U0001F514 Phát hiện chuyển động!"
+          selector:
+            text:
+              multiline: false
+              multiple: false
+    zalo_custom_section:
+      name: Zalo Custom Integration Settings
+      icon: mdi:chat-processing
+      collapsed: true
+      input:
+        enable_zalo_custom:
+          name: ✅ Enable Zalo Custom Integration
+          description: "\U0001F449 Bật/tắt gửi thông báo qua Zalo Custom Integration
+            (zalo_bot).\n"
+          default: false
+          selector:
+            boolean: {}
+        zalo_custom_account:
+          name: "\U0001F4F1 Zalo Account"
+          description: "\U0001F449 Số điện thoại tài khoản Zalo dùng để gửi tin nhắn.\n⚠️
+            Ví dụ: +84376861184\n"
+          default: ''
+          selector:
+            text:
+              multiline: false
+              multiple: false
+        zalo_custom_thread_id:
+          name: "\U0001F4AC Thread ID (Nhóm)"
+          description: "\U0001F449 ID của nhóm Zalo muốn gửi thông báo.\n⚠️ Nhập dạng
+            text để tránh mất độ chính xác với số lớn.\n⚠️ Chỉ dùng khi Receiver Type
+            = Group.\n"
+          default: ''
+          selector:
+            text:
+              multiple: false
+              multiline: false
+        zalo_custom_user_id:
+          name: "\U0001F464 User ID (Cá nhân)"
+          description: "\U0001F449 ID của người nhận Zalo.\n⚠️ Nhập dạng text để tránh
+            mất độ chính xác với số lớn.\n⚠️ Chỉ dùng khi Receiver Type = User.\n"
+          default: ''
+          selector:
+            text:
+              multiple: false
+              multiline: false
+        zalo_custom_receiver_type:
+          name: "\U0001F465 Type of Receiver"
+          description: "\U0001F449 Loại người nhận tin nhắn Zalo.\n"
+          default: '0'
+          selector:
+            select:
+              options:
+              - label: User (Cá nhân)
+                value: '0'
+              - label: Group (Nhóm)
+                value: '1'
+              multiple: false
+              custom_value: false
+              sort: false
+        zalo_custom_ttl:
+          name: ⏳ Message TTL
+          description: "\U0001F449 Thời gian tự động thu hồi tin nhắn (milliseconds).\n✅
+            Đặt 0 = không thu hồi. Tối đa 86400000ms = 24 giờ.\n"
+          default: 0
+          selector:
+            number:
+              min: 0.0
+              max: 86400000.0
+              step: 1000.0
+              mode: box
+        zalo_custom_initial_caption:
+          name: "\U0001F4DD Initial Caption"
+          description: "\U0001F449 Nội dung tin nhắn ban đầu gửi kèm ảnh qua Zalo
+            Custom."
+          default: "\U0001F514 Phát hiện chuyển động!"
+          selector:
+            text:
+              multiline: true
+              multiple: false
+    tts_speaker_section:
+      name: TTS Speaker Settings
+      icon: mdi:speaker
+      collapsed: true
+      input:
+        include_tts_announcement:
+          name: ✅ Use TTS Announcement (Optional)
+          description: "\U0001F449 Bật để phát thông báo bằng giọng nói ra loa được
+            tích hợp HA.\n"
+          default: false
+          selector:
+            boolean: {}
+        num_volume_speaker:
+          name: "\U0001F50A Volume Set"
+          description: "\U0001F449 Thiết lập âm lượng cho loa (từ 0.1 đến 1.0).\n✅
+            Mặc định: 0.5 (50%).\n"
+          default: 0.5
+          selector:
+            number:
+              min: 0.1
+              max: 1.0
+              step: 0.1
+              mode: slider
+        text_to_speech_engine:
+          name: "\U0001F5E3️ Text-to-Speech Service Provider"
+          description: "\U0001F449 Chọn dịch vụ TTS hỗ trợ trong HA."
+          default: []
+          selector:
+            entity:
+              filter:
+              - domain:
+                - tts
+              multiple: false
+              reorder: false
+        media_player:
+          name: "\U0001F3B6 Media Player"
+          description: "\U0001F449 Chọn loa để phát thông báo giọng nói.\n✅ Có thể
+            chọn nhiều loa cùng lúc.\n"
+          default: []
+          selector:
+            entity:
+              filter:
+              - domain:
+                - media_player
+              multiple: true
+              reorder: false
+    delay_settings:
+      name: Delay Settings
+      icon: mdi:clock-start
+      collapsed: true
+      input:
+        num_delay_actions:
+          name: ⌛ Delays
+          description: "\U0001F449 Thời gian chờ (giây) sau khi hoàn thành tất cả
+            các hành động.\n"
+          default: 10
+          selector:
+            number:
+              min: 5.0
+              max: 120.0
+              step: 5.0
+              unit_of_measurement: seconds
+              mode: slider
+variables:
+  trigger_sensor: !input trigger_sensor
+  person_sensor: !input person_occupancy_sensor
+  person_detected_state: !input person_detected_state
+  wait_for_person: !input wait_for_person
+  max_wait_time: !input max_wait_time
+  cooldown: !input cooldown
+  camera_entities_list: !input camera_entities
+  camera_entity: '{{ camera_entities_list[0] if camera_entities_list else '''' }}'
+  camera_name: '{{ state_attr(camera_entity, "friendly_name") | default(camera_entity)
+    }}'
+  camera_file_path: '{{ camera_entity.replace("camera.", "") }}'
+  num_snapshots: !input num_snapshots
+  num_delay_before_snapshot: !input num_delay_before_snapshot
+  num_delay: !input num_delay
+  overwrite_image: !input overwrite_image
+  ai_powered: !input ai_powered
+  ai_mode: !input ai_mode
+  ai_provider: !input ai_provider
+  detect_subjects: !input detect_subjects
+  ai_task_instructions: "{% if ai_mode == 'json' %}\n\n  {# ============================================================
+    #}\n  {# TRƯỜNG HỢP 1: JSON — Chỉ người (humans)                      #}\n  {#
+    ============================================================ #}\n  {% if detect_subjects
+    == 'humans' %}\nĐây là chuỗi hình ảnh từ máy ảnh của tôi. Hãy phân tích chuỗi
+    ảnh này. Chỉ trả về JSON thuần, không giải thích thêm, theo đúng mẫu sau: {\"humans_detected\":0,\"humans_detected_summary\":\"\",\"humans_detected_description\":\"\"}\nQuy
+    tắc từng trường: humans_detected: (số nguyên) đếm tổng số người trong chuỗi ảnh.
+    Điền 0 nếu không có người. humans_detected_summary: tóm tắt số lượng người theo
+    loại, ví dụ \"1 phụ nữ, 2 trẻ em\" hoặc \"2 đàn ông, 1 phụ nữ\". Trả về chuỗi
+    rỗng nếu không có người. humans_detected_description: mô tả chi tiết từng người
+    bao gồm:\n  - Người lớn hay trẻ em, giới tính.\n  - Trang phục và màu sắc cụ thể.\n
+    \ - Hành động đang làm, tay đang cầm gì (NẾU CẦM VẬT NGUY HIỂM NHƯ DAO, SÚNG HÃY
+    CẢNH BÁO RÕ RÀNG).\n  - Hướng di chuyển: dựa vào sự thay đổi kích thước và vị
+    trí giữa đầu và cuối chuỗi ảnh để kết luận \"đang đi vào\" (tiến gần camera, kích
+    thước lớn dần), \"đang đi ra\" (đi xa camera, kích thước nhỏ dần) hoặc \"di chuyển
+    ngang\".\n  - Ví dụ: \"Một phụ nữ mặc đồ bộ hồng cam tay cầm điện thoại đang đi
+    vào, bên cạnh là một bé trai áo vàng cam đang đứng chơi.\"\n  - Nếu humans_detected
+    = 0, PHẢI trả về CHÍNH XÁC chuỗi: \"Đã phát hiện chuyển động tuy nhiên không có
+    người trong chuỗi ảnh khi so sánh\".\n\nQUAN TRỌNG: - BẮT BUỘC viết tiếng Việt
+    có đầy đủ dấu. TUYỆT ĐỐI KHÔNG viết tiếng Việt không dấu. - TUYỆT ĐỐI KHÔNG bọc
+    kết quả trong markdown code block. - Chỉ trả về raw JSON thuần, bắt đầu bằng {
+    và kết thúc bằng }. - LOẠI BỎ ```json và ```. - TẤT CẢ NỘI DUNG TRÊN MỘT DÒNG
+    DUY NHẤT, TUYỆT ĐỐI KHÔNG NGẮT DÒNG. - Giọng văn: Trẻ trung, hóm hỉnh, đi thẳng
+    vào trọng tâm, không rườm rà thưa gửi.\n\n  {# ============================================================
+    #}\n  {# TRƯỜNG HỢP 2: JSON — Chỉ động vật (animals)                  #}\n  {#
+    ============================================================ #}\n  {% elif detect_subjects
+    == 'animals' %}\nĐây là chuỗi hình ảnh từ máy ảnh của tôi. Hãy phân tích chuỗi
+    ảnh này. Chỉ trả về JSON thuần, không giải thích thêm, theo đúng mẫu sau: {\"animals_detected\":0,\"animals_detected_summary\":\"\",\"animals_detected_description\":\"\"}\nQuy
+    tắc từng trường: animals_detected: (số nguyên) đếm tổng số động vật (chó, mèo,
+    chim, chuột, thằn lằn, v.v.) trong chuỗi ảnh. Điền 0 nếu không có động vật. animals_detected_summary:
+    tóm tắt số lượng động vật theo loài, ví dụ \"1 con chó vàng, 2 con mèo đen\".
+    Trả về chuỗi rỗng nếu không có động vật. animals_detected_description: mô tả chi
+    tiết từng con vật bao gồm:\n  - Loài động vật, màu sắc lông/vũ cụ thể, kích thước
+    tương đối.\n  - Hành động đang làm.\n  - Hướng di chuyển dựa vào sự thay đổi kích
+    thước và vị trí giữa các khung hình: \"đang tiến vào\" (kích thước lớn dần), \"đang
+    đi ra\" (kích thước nhỏ dần) hoặc \"di chuyển ngang\".\n  - Ví dụ: \"Một con chó
+    lông vàng cỡ vừa đang chạy vào, phía sau là một con mèo đen trắng đang ngồi liếm
+    chân.\"\n  - Nếu animals_detected = 0, PHẢI trả về CHÍNH XÁC chuỗi: \"Đã phát
+    hiện chuyển động tuy nhiên không có động vật trong chuỗi ảnh khi so sánh\".\n\nQUAN
+    TRỌNG: - BẮT BUỘC viết tiếng Việt có đầy đủ dấu. TUYỆT ĐỐI KHÔNG viết tiếng Việt
+    không dấu. - TUYỆT ĐỐI KHÔNG bọc kết quả trong markdown code block. - Chỉ trả
+    về raw JSON thuần, bắt đầu bằng { và kết thúc bằng }. - LOẠI BỎ ```json và ```.
+    - TẤT CẢ NỘI DUNG TRÊN MỘT DÒNG DUY NHẤT, TUYỆT ĐỐI KHÔNG NGẮT DÒNG. - Giọng văn:
+    Trẻ trung, hóm hỉnh, đi thẳng vào trọng tâm, không rườm rà thưa gửi.\n\n  {# ============================================================
+    #}\n  {# TRƯỜNG HỢP 3: JSON — Cả người, động vật và phương tiện (both) #}\n  {#
+    ============================================================ #}\n  {% else %}\nĐây
+    là chuỗi hình ảnh từ máy ảnh của tôi. Hãy phân tích chuỗi ảnh này. Chỉ trả về
+    JSON thuần, không giải thích thêm, theo đúng mẫu sau: {\"humans_detected\":0,\"humans_detected_summary\":\"\",\"humans_detected_description\":\"\",\"animals_detected\":0,\"animals_detected_summary\":\"\",\"animals_detected_description\":\"\"}\nQuy
+    tắc từng trường: humans_detected: (số nguyên) đếm tổng số người trong chuỗi ảnh.
+    Điền 0 nếu không có người. humans_detected_summary: tóm tắt số lượng người theo
+    loại, ví dụ \"1 phụ nữ, 2 trẻ em\". Trả về chuỗi rỗng nếu không có người. humans_detected_description:
+    mô tả chi tiết từng người bao gồm người lớn hay trẻ em, giới tính, trang phục
+    màu sắc cụ thể, hành động, tay đang cầm gì (NẾU CẦM VẬT NGUY HIỂM NHƯ DAO, SÚNG
+    HÃY CẢNH BÁO RÕ RÀNG). Dựa vào sự thay đổi kích thước và vị trí giữa đầu và cuối
+    chuỗi ảnh để kết luận hướng di chuyển: \"đang đi vào\", \"đang đi ra\" hoặc \"di
+    chuyển ngang\". Nếu humans_detected = 0, PHẢI trả về CHÍNH XÁC chuỗi: \"Đã phát
+    hiện chuyển động tuy nhiên không có người trong chuỗi ảnh khi so sánh\". animals_detected:
+    (số nguyên) đếm tổng số động vật (chó, mèo, chim, chuột, thằn lằn, v.v.) trong
+    chuỗi ảnh. Điền 0 nếu không có động vật. animals_detected_summary: tóm tắt số
+    lượng động vật theo loài, ví dụ \"1 con chó vàng, 2 con mèo đen\". Trả về chuỗi
+    rỗng nếu không có động vật. animals_detected_description: mô tả chi tiết từng
+    con vật bao gồm loài, màu sắc lông/vũ, kích thước, hành động và hướng di chuyển.
+    Nếu animals_detected = 0, PHẢI trả về CHÍNH XÁC chuỗi: \"Đã phát hiện chuyển động
+    tuy nhiên không có động vật trong chuỗi ảnh khi so sánh\".\nLưu ý thêm: Nếu phát
+    hiện phương tiện (xe máy, ô tô, xe đạp), hãy ghi chú màu sắc và loại xe vào trường
+    mô tả của đối tượng gần nhất hoặc humans_detected_description nếu có người đi
+    kèm.\nQUAN TRỌNG: - BẮT BUỘC viết tiếng Việt có đầy đủ dấu. TUYỆT ĐỐI KHÔNG viết
+    tiếng Việt không dấu. - TUYỆT ĐỐI KHÔNG bọc kết quả trong markdown code block.
+    - Chỉ trả về raw JSON thuần, bắt đầu bằng { và kết thúc bằng }. - LOẠI BỎ ```json
+    và ```. - TẤT CẢ NỘI DUNG TRÊN MỘT DÒNG DUY NHẤT, TUYỆT ĐỐI KHÔNG NGẮT DÒNG. -
+    Giọng văn: Trẻ trung, hóm hỉnh, đi thẳng vào trọng tâm, không rườm rà thưa gửi.\n
+    \ {% endif %}\n\n{% else %}\n\n  {# ============================================================
+    #}\n  {# TRƯỜNG HỢP 4: Structured — Chỉ người (humans)                #}\n  {#
+    ============================================================ #}\n  {% if detect_subjects
+    == 'humans' %}\nBạn là hệ thống thị giác máy tính giám sát camera. Hãy phân tích
+    bối cảnh và hoạt động trong chuỗi ảnh. Nhiệm vụ: CHỈ phân tích CON NGƯỜI trong
+    ảnh. Bỏ qua hoàn toàn động vật và phương tiện.\nRÀNG BUỘC BẮT BUỘC: 1. Ngôn ngữ:
+    100% Tiếng Việt chuẩn, đầy đủ dấu. TUYỆT ĐỐI KHÔNG viết tiếng Việt không dấu.
+    2. Định dạng: Chỉ trả về MỘT câu duy nhất, tuyệt đối không ngắt dòng. 3. Giọng
+    điệu: Trẻ trung, hóm hỉnh, đi thẳng vào trọng tâm, không rườm rà thưa gửi. 4.
+    Chỉ dùng văn bản thuần, tuyệt đối không dùng markdown, emoji hay ký tự đặc biệt.
+    5. Nội dung ngắn gọn, đủ để đưa vào thông báo điện thoại.\nBước 1 — Đếm tổng số
+    người nhìn thấy được. Điền số nguyên vào trường humans_detected (tối thiểu là
+    0). Bước 2 — Điền giá trị CỐ ĐỊNH sau cho CÁC TRƯỜNG ĐỘNG VẬT (KHÔNG được thay
+    đổi):\n          animals_detected = 0\n          animals_detected_summary = \"\"
+    (chuỗi rỗng)\n          animals_detected_description = \"Không phân tích động
+    vật theo yêu cầu\"\n\n  {# ============================================================
+    #}\n  {# TRƯỜNG HỢP 5: Structured — Chỉ động vật (animals)            #}\n  {#
+    ============================================================ #}\n  {% elif detect_subjects
+    == 'animals' %}\nBạn là hệ thống thị giác máy tính giám sát camera. Hãy phân tích
+    bối cảnh và hoạt động trong chuỗi ảnh. Nhiệm vụ: CHỈ phân tích ĐỘNG VẬT (chó,
+    mèo, chim, chuột, thằn lằn, v.v.) trong ảnh. Bỏ qua hoàn toàn con người.\nRÀNG
+    BUỘC BẮT BUỘC: 1. Ngôn ngữ: 100% Tiếng Việt chuẩn, đầy đủ dấu. TUYỆT ĐỐI KHÔNG
+    viết tiếng Việt không dấu. 2. Định dạng: Chỉ trả về MỘT câu duy nhất, tuyệt đối
+    không ngắt dòng. 3. Giọng điệu: Trẻ trung, hóm hỉnh, đi thẳng vào trọng tâm, không
+    rườm rà thưa gửi. 4. Chỉ dùng văn bản thuần, tuyệt đối không dùng markdown, emoji
+    hay ký tự đặc biệt. 5. Nội dung ngắn gọn, đủ để đưa vào thông báo điện thoại.\nBước
+    1 — Đếm tổng số động vật nhìn thấy được. Điền số nguyên vào trường animals_detected
+    (tối thiểu là 0). Bước 2 — Điền giá trị CỐ ĐỊNH sau cho CÁC TRƯỜNG NGƯỜI (KHÔNG
+    được thay đổi):\n          humans_detected = 0\n          humans_detected_summary
+    = \"\" (chuỗi rỗng)\n          humans_detected_description = \"Không phân tích
+    người theo yêu cầu\"\n\n  {# ============================================================
+    #}\n  {# TRƯỜNG HỢP 6: Structured — Cả người, động vật, phương tiện   #}\n  {#
+    ============================================================ #}\n  {% else %}\nBạn
+    là hệ thống thị giác máy tính giám sát camera. Hãy phân tích bối cảnh và hoạt
+    động trong chuỗi ảnh. Nhiệm vụ: Phân tích tất cả các chủ thể động gồm CON NGƯỜI,
+    ĐỘNG VẬT và PHƯƠNG TIỆN trong ảnh.\nRÀNG BUỘC BẮT BUỘC: 1. Ngôn ngữ: 100% Tiếng
+    Việt chuẩn, đầy đủ dấu. TUYỆT ĐỐI KHÔNG viết tiếng Việt không dấu. 2. Định dạng:
+    Chỉ trả về MỘT câu duy nhất, tuyệt đối không ngắt dòng. 3. Giọng điệu: Trẻ trung,
+    hóm hỉnh, đi thẳng vào trọng tâm, không rườm rà thưa gửi. 4. Chỉ dùng văn bản
+    thuần, tuyệt đối không dùng markdown, emoji hay ký tự đặc biệt. 5. Nội dung ngắn
+    gọn, đủ để đưa vào thông báo điện thoại.\nBước 1 — Đếm tổng số người nhìn thấy.
+    Điền số nguyên vào humans_detected. Nếu không có người → điền 0. Bước 2 — Đếm
+    tổng số động vật (chó, mèo, chim, chuột, thằn lằn, v.v.). Điền số nguyên vào animals_detected.
+    Nếu không có động vật → điền 0.\n  {% endif %}\n\n{% endif %}\n"
+  ai_structure_description_humans: "{% if ai_mode == 'structured' and detect_subjects
+    in ['humans', 'both'] %}\n  {% if detect_subjects == 'humans' %}\nQuét chuỗi ảnh
+    và tập trung trích xuất dữ liệu CON NGƯỜI. Bỏ qua hoàn toàn cảnh quan, tòa nhà,
+    vật thể tĩnh và động vật. Đối với mỗi người phát hiện được: - Xác định người lớn
+    hay trẻ em, giới tính (đàn ông/phụ nữ/trẻ em). - Mô tả màu sắc và thể loại trang
+    phục cụ thể. - Hành động đang thực hiện, tay đang cầm gì. NẾU CẦM VẬT NGUY HIỂM
+    (dao, súng, gậy) HÃY CẢNH BÁO RÕ RÀNG. - Hướng di chuyển: dựa vào sự thay đổi
+    kích thước và vị trí của chủ thể giữa đầu và cuối chuỗi ảnh để kết luận \"đang
+    đi vào\" (tiến gần camera, kích thước lớn dần), \"đang đi ra\" (đi xa camera,
+    kích thước nhỏ dần) hoặc \"di chuyển ngang\". - Ví dụ: \"Một phụ nữ mặc đồ bộ
+    hồng cam tay không cầm gì đang đi vào, bên cạnh là một bé trai áo vàng cam đang
+    đứng chơi.\" - Nếu humans_detected = 0, PHẢI trả về CHÍNH XÁC chuỗi: \"Đã phát
+    hiện chuyển động tuy nhiên không có người trong chuỗi ảnh khi so sánh\".\n  {%
+    else %}\nQuét chuỗi ảnh và tập trung trích xuất dữ liệu CON NGƯỜI. Bỏ qua hoàn
+    toàn cảnh quan, tòa nhà và vật thể tĩnh. Động vật sẽ được mô tả ở trường riêng.
+    Đối với mỗi người phát hiện được: - Xác định người lớn hay trẻ em, giới tính (đàn
+    ông/phụ nữ/trẻ em). - Mô tả màu sắc và thể loại trang phục cụ thể. - Hành động
+    đang thực hiện, tay đang cầm gì. NẾU CẦM VẬT NGUY HIỂM (dao, súng, gậy) HÃY CẢNH
+    BÁO RÕ RÀNG. - Nếu người đi kèm phương tiện (xe máy, ô tô, xe đạp), ghi chú thêm
+    loại xe và màu sắc. - Hướng di chuyển: dựa vào sự thay đổi kích thước và vị trí
+    giữa đầu và cuối chuỗi ảnh để kết luận \"đang đi vào\", \"đang đi ra\" hoặc \"di
+    chuyển ngang\". - Nếu humans_detected = 0, PHẢI trả về CHÍNH XÁC chuỗi: \"Đã phát
+    hiện chuyển động tuy nhiên không có người trong chuỗi ảnh khi so sánh\".\n  {%
+    endif %}\n{% else %} Không yêu cầu phân tích người theo cấu hình hiện tại. PHẢI
+    trả về CHÍNH XÁC chuỗi sau (không thêm bớt ký tự): \"Không phân tích người theo
+    yêu cầu\". {% endif %}\n"
+  ai_structure_description_animals: "{% if ai_mode == 'structured' and detect_subjects
+    in ['animals', 'both'] %}\n  {% if detect_subjects == 'animals' %}\nQuét chuỗi
+    ảnh và tập trung trích xuất dữ liệu ĐỘNG VẬT. Bỏ qua hoàn toàn cảnh quan, tòa
+    nhà, vật thể tĩnh và con người. Đối với mỗi động vật phát hiện được: - Xác định
+    rõ loài (chó, mèo, chim, chuột, thằn lằn, v.v.). - Mô tả màu sắc lông/vũ cụ thể
+    và kích thước tương đối (nhỏ/vừa/lớn). - Hành động đang làm (chạy, nằm, ngồi,
+    ăn, v.v.). - Hướng di chuyển: dựa vào sự thay đổi kích thước và vị trí giữa đầu
+    và cuối chuỗi ảnh để kết luận \"đang tiến vào\" (kích thước lớn dần), \"đang đi
+    ra\" (kích thước nhỏ dần) hoặc \"di chuyển ngang\". - Ví dụ: \"Một con chó lông
+    vàng cỡ vừa đang chạy vào, phía sau là một con mèo đen trắng đang ngồi liếm chân.\"
+    - Nếu animals_detected = 0, PHẢI trả về CHÍNH XÁC chuỗi: \"Đã phát hiện chuyển
+    động tuy nhiên không có động vật trong chuỗi ảnh khi so sánh\".\n  {% else %}\nQuét
+    chuỗi ảnh và tập trung trích xuất dữ liệu ĐỘNG VẬT và PHƯƠNG TIỆN không có người
+    đi kèm. Bỏ qua hoàn toàn cảnh quan, tòa nhà và vật thể tĩnh. Con người đã được
+    mô tả ở trường riêng. Đối với mỗi động vật phát hiện được: - Xác định rõ loài,
+    màu sắc lông/vũ cụ thể, kích thước tương đối. - Hành động đang làm và hướng di
+    chuyển (\"đang tiến vào\", \"đang đi ra\" hoặc \"di chuyển ngang\") dựa theo sự
+    thay đổi kích thước giữa các khung hình. Nếu có phương tiện xuất hiện một mình
+    (không có người đi kèm), ghi chú loại xe và màu sắc. - Nếu animals_detected =
+    0, PHẢI trả về CHÍNH XÁC chuỗi: \"Đã phát hiện chuyển động tuy nhiên không có
+    động vật trong chuỗi ảnh khi so sánh\".\n  {% endif %}\n{% else %} Không yêu cầu
+    phân tích động vật theo cấu hình hiện tại. PHẢI trả về CHÍNH XÁC chuỗi sau (không
+    thêm bớt ký tự): \"Không phân tích động vật theo yêu cầu\". {% endif %}\n"
+  include_notify: !input include_notify
+  notify_device: !input notify_device
+  is_ios_android: !input is_ios_android
+  notify_title: !input notify_title
+  tap_navigate: !input tap_navigate
+  notification_time: !input notification_time
+  filtered_devices: '{{ notify_device }}'
+  include_telegram_notify: !input include_telegram_notify
+  telegram_config_entry: !input telegram_config_entry
+  telegram_target: !input telegram_target
+  telegram_thread_id: !input telegram_thread_id
+  telegram_initial_caption: !input telegram_initial_caption
+  enable_zalo_bot: !input enable_zalo_bot
+  zalo_bot_chat_id: !input zalo_bot_chat_id
+  zalo_bot_initial_caption: !input zalo_bot_initial_caption
+  enable_zalo_custom: !input enable_zalo_custom
+  zalo_custom_account: !input zalo_custom_account
+  zalo_custom_thread_id: !input zalo_custom_thread_id
+  zalo_custom_user_id: !input zalo_custom_user_id
+  zalo_custom_receiver_type: !input zalo_custom_receiver_type
+  zalo_custom_ttl: !input zalo_custom_ttl
+  zalo_custom_initial_caption: !input zalo_custom_initial_caption
+  zalo_resolved_id: "{% if zalo_custom_receiver_type == '1' %}\n  {{ zalo_custom_thread_id
+    if zalo_custom_thread_id | length > 0 else '' }}\n{% else %}\n  {{ zalo_custom_user_id
+    if zalo_custom_user_id | length > 0 else '' }}\n{% endif %}\n"
+  include_tts_announcement: !input include_tts_announcement
+  num_volume_speaker: !input num_volume_speaker
+  text_to_speech_engine: !input text_to_speech_engine
+  media_player: !input media_player
+  num_delay_actions: !input num_delay_actions
+  tag: '{{ camera_entity + int(as_timestamp(now())) | string }}'
+  notification_color: !input notification_color
+  notification_color_hex: '#{{ ''%02x%02x%02x'' | format(notification_color[0], notification_color[1],
+    notification_color[2]) }}
+
+    '
+max_exceeded: silent
+mode: single
+trigger_variables:
+  _trigger_sensors: !input trigger_sensor
+triggers:
+- platform: state
+  entity_id: !input trigger_sensor
+  from: !input trigger_from_state
+  to: !input trigger_to_state
+actions:
+- choose:
+  - conditions:
+    - condition: template
+      value_template: '{{ wait_for_person and person_sensor | length > 0 }}'
+    sequence:
+    - if:
+      - condition: state
+        entity_id: !input person_occupancy_sensor
+        state: !input person_detected_state
+      then: []
+      else:
+      - choose:
+        - conditions:
+          - condition: template
+            value_template: '{{ max_wait_time == 0 }}'
+          sequence:
+          - wait_for_trigger:
+            - platform: state
+              entity_id: !input person_occupancy_sensor
+              to: !input person_detected_state
+            continue_on_timeout: true
+        - conditions:
+          - condition: template
+            value_template: '{{ max_wait_time > 0 }}'
+          sequence:
+          - wait_for_trigger:
+            - platform: state
+              entity_id: !input person_occupancy_sensor
+              to: !input person_detected_state
+            timeout:
+              seconds: '{{ max_wait_time }}'
+            continue_on_timeout: true
+- variables:
+    file_path_dynamic: '{{ camera_file_path }}_{{ context.id }}'
+
+- delay:
+    seconds: '{{ num_delay_before_snapshot }}'
+- repeat:
+    count: '{{ num_snapshots }}'
+    sequence:
+    - action: camera.snapshot
+      data:
+        filename: /media/snapshots/{{ file_path_dynamic }}_snapshot{{ repeat.index
+          }}.jpg
+      target:
+        entity_id: '{{ camera_entity }}'
+    - if:
+      - condition: template
+        value_template: '{{ repeat.index < num_snapshots }}'
+      then:
+      - delay:
+          seconds: '{{ num_delay }}'
+- variables:
+    snapshots_url: "{% set snap_count = num_snapshots | int %} {% set camera = file_path_dynamic
+      %} {% set ns = namespace(images=[]) %} {%- for i in range(1, snap_count + 1)
+      -%}\n  {% set ns.images = ns.images + [{\n    'media_content_id': 'media-source://media_source/local/snapshots/'
+      ~ camera ~ '_snapshot' ~ i ~ '.jpg',\n    'media_content_type': 'image/jpeg'\n
+      \ }] %}\n{%- endfor -%} {{ ns.images }}\n"
+    snapshot_first: /media/local/snapshots/{{ file_path_dynamic }}_snapshot1.jpg
+- choose:
+  - conditions:
+    - condition: template
+      value_template: '{{ include_telegram_notify }}'
+    sequence:
+    - alias: Gửi ảnh qua Telegram
+      continue_on_error: true
+      action: telegram_bot.send_photo
+      data: "{% set data = {\n  'config_entry_id': telegram_config_entry,\n  'file':
+        '/media/snapshots/' + file_path_dynamic + '_snapshot1.jpg',\n  'caption':
+        telegram_initial_caption\n} %} {% if telegram_target != \"\" %}\n  {% set
+        data = dict(data, chat_id=telegram_target | int) %}\n{% endif %} {% if telegram_thread_id
+        != \"\" %}\n  {% set data = dict(data, message_thread_id=telegram_thread_id
+        | int) %}\n{% endif %} {{ data }}\n"
+- choose:
+  - conditions:
+    - condition: template
+      value_template: '{{ enable_zalo_bot }}'
+    sequence:
+    - alias: Gửi ảnh qua Zalo Bot (Pyscript)
+      continue_on_error: true
+      action: pyscript.send_zalo_photo
+      data:
+        chat_id: '{{ zalo_bot_chat_id }}'
+        file_path: /media/snapshots/{{ file_path_dynamic }}_snapshot1.jpg
+        caption: '{{ zalo_bot_initial_caption }}'
+      response_variable: zalo_bot_photo_response
+- choose:
+  - conditions:
+    - condition: template
+      value_template: "{{ enable_zalo_custom\n   and zalo_resolved_id | trim | length
+        > 0\n   and zalo_custom_account | length > 0 }}\n"
+    sequence:
+    - alias: Gửi ảnh qua Zalo Custom Integration
+      continue_on_error: true
+      action: zalo_bot.send_image
+      data:
+        account_selection: !input zalo_custom_account
+        thread_id: '{{ zalo_resolved_id | trim | string }}'
+        type: !input zalo_custom_receiver_type
+        image_path: /media/snapshots/{{ file_path_dynamic }}_snapshot1.jpg
+        message: '{{ zalo_custom_initial_caption }}'
+        ttl: !input zalo_custom_ttl
+      response_variable: zalo_custom_image_response
+- if:
+  - condition: template
+    value_template: '{{ include_notify and (filtered_devices | length > 0) }}'
+  then:
+  - choose:
+    - alias: Android - Bước 1 gửi ảnh
+      conditions:
+      - '{{ is_ios_android == ''android_device'' }}'
+      sequence:
+      - repeat:
+          for_each: '{{ filtered_devices }}'
+          sequence:
+          - continue_on_error: true
+            action: 'notify.mobile_app_{{ device_attr(repeat.item, ''name'') | slugify
+              }}
+
+              '
+            data:
+              title: !input notify_title
+              message: "\U0001F4F7 Ảnh chụp từ {{ camera_name }}"
+              data:
+                priority: high
+                notification_icon: !input status_bar_icon
+                color: '{{ notification_color_hex }}'
+                image: '{{ snapshot_first }}'
+                url: '{{ tap_navigate }}'
+                clickAction: '{{ tap_navigate }}'
+                tag: '{{ tag }}_image'
+    - alias: iOS - Bước 1 gửi ảnh
+      conditions:
+      - '{{ is_ios_android == ''ios_device'' }}'
+      sequence:
+      - repeat:
+          for_each: '{{ filtered_devices }}'
+          sequence:
+          - continue_on_error: true
+            action: 'notify.mobile_app_{{ device_attr(repeat.item, ''name'') | slugify
+              }}
+
+              '
+            data:
+              title: !input notify_title
+              message: "\U0001F4F7 Ảnh chụp từ {{ camera_name }}"
+              data:
+                attachment:
+                  url: '{{ snapshot_first }}'
+                  content_type: JPEG
+                tag: '{{ tag }}_image'
+- choose:
+  - alias: Chạy phân tích AI nếu được bật
+    conditions:
+    - '{{ ai_powered }}'
+    sequence:
+    - choose:
+      - alias: Structured Output Mode
+        conditions:
+        - condition: template
+          value_template: '{{ ai_mode == ''structured'' }}'
+        sequence:
+        - action: ai_task.generate_data
+          data:
+            task_name: Phan tich anh khi co chuyen dong
+            instructions: '{{ ai_task_instructions }}'
+            entity_id: '{{ ai_provider if ai_provider | length > 0 else omit }}'
+            attachments: '{{ snapshots_url }}'
+            structure:
+              humans_detected:
+                description: 'Tổng số người đếm được trong chuỗi ảnh (số nguyên ≥
+                  0). Nếu không có người hoặc không yêu cầu phân tích người → điền
+                  0.
+
+                  '
+                required: true
+                selector:
+                  number:
+              humans_detected_summary:
+                description: 'Tóm tắt số lượng người theo loại, viết tiếng Việt có
+                  dấu. Ví dụ: "1 phụ nữ, 2 đàn ông, 1 trẻ em". Trả về chuỗi rỗng nếu
+                  không có người hoặc không yêu cầu phân tích người.
+
+                  '
+                required: true
+                selector:
+                  text:
+              humans_detected_description:
+                description: '{{ ai_structure_description_humans }}'
+                required: true
+                selector:
+                  text:
+              animals_detected:
+                description: 'Tổng số động vật (chó, mèo, chim, v.v.) đếm được trong
+                  chuỗi ảnh (số nguyên ≥ 0). Nếu không có động vật hoặc không yêu
+                  cầu phân tích động vật → điền 0.
+
+                  '
+                required: true
+                selector:
+                  number:
+              animals_detected_summary:
+                description: 'Tóm tắt số lượng động vật theo loài, viết tiếng Việt
+                  có dấu. Ví dụ: "1 con chó vàng, 2 con mèo đen". Trả về chuỗi rỗng
+                  nếu không có động vật hoặc không yêu cầu phân tích động vật.
+
+                  '
+                required: true
+                selector:
+                  text:
+              animals_detected_description:
+                description: '{{ ai_structure_description_animals }}'
+                required: true
+                selector:
+                  text:
+          response_variable: humans_detected_report
+      - alias: JSON Mode (OpenAI / Raw JSON)
+        conditions:
+        - condition: template
+          value_template: '{{ ai_mode == ''json'' }}'
+        sequence:
+        - action: ai_task.generate_data
+          data:
+            task_name: Phan tich anh khi co chuyen dong
+            instructions: '{{ ai_task_instructions }}'
+            entity_id: '{{ ai_provider if ai_provider | length > 0 else omit }}'
+            attachments: '{{ snapshots_url }}'
+          response_variable: humans_detected_report_raw
+        - variables:
+            humans_detected_report: "{% if humans_detected_report_raw is defined\n
+              \  and humans_detected_report_raw.data is defined %}\n  {% set parsed
+              = (humans_detected_report_raw.data\n    | regex_replace('```json\\\\s*',
+              '')\n    | regex_replace('```\\\\s*', '')\n    | trim\n    | from_json(default={}))
+              %}\n  {% set fixed = {\n    'humans_detected':              parsed.get('humans_detected',
+              \             parsed.get('humansdetected', 0)),\n    'humans_detected_summary':
+              \     parsed.get('humans_detected_summary',      parsed.get('humansdetectedsummary',
+              '')),\n    'humans_detected_description':  parsed.get('humans_detected_description',
+              \ parsed.get('humansdetecteddescription', '')),\n    'animals_detected':
+              \            parsed.get('animals_detected',             parsed.get('animalsdetected',
+              0)),\n    'animals_detected_summary':     parsed.get('animals_detected_summary',
+              \    parsed.get('animalsdetectedsummary', '')),\n    'animals_detected_description':
+              parsed.get('animals_detected_description', parsed.get('animalsdetecteddescription',
+              ''))\n  } %}\n  {{ {'data': fixed} }}\n{% else %}\n  {{ {} }}\n{% endif
+              %}\n"
+    - wait_template: "{{ humans_detected_report is defined\n   and humans_detected_report.data
+        is defined }}\n"
+      timeout: 00:01:00
+      continue_on_timeout: true
+    - if:
+      - condition: template
+        value_template: '{{ wait.completed }}'
+      then:
+      - variables:
+          ai_messages: "{%- set h_count = humans_detected_report.data.get('humans_detected',
+            0) | int(0) -%} {%- set a_count = humans_detected_report.data.get('animals_detected',
+            0) | int(0) -%} {%- set h_summary = humans_detected_report.data.get('humans_detected_summary',
+            '') -%} {%- set a_summary = humans_detected_report.data.get('animals_detected_summary',
+            '') -%} {%- set h_desc = humans_detected_report.data.get('humans_detected_description',
+            '') -%} {%- set a_desc = humans_detected_report.data.get('animals_detected_description',
+            '') -%} {%- set days = ['Thứ hai', 'Thứ ba', 'Thứ tư', 'Thứ năm', 'Thứ
+            sáu', 'Thứ bảy', 'Chủ nhật'] -%} {%- set ns = namespace(lines=[]) -%}
+            {%- set ns.lines = ns.lines + ['\U0001F4CA  ' + camera_name] -%} {%- if
+            detect_subjects in ['humans', 'both'] -%}\n  {%- set ns.lines = ns.lines
+            + ['\U0001F6B6: ' + (h_summary if h_summary | length > 0 else h_count
+            | string)] -%}\n  {%- set ns.lines = ns.lines + ['\U0001F449 ' + h_desc]
+            -%}\n{%- endif -%} {%- if detect_subjects in ['animals', 'both'] -%}\n
+            \ {%- set ns.lines = ns.lines + ['\U0001F43E: ' + (a_summary if a_summary
+            | length > 0 else a_count | string)] -%}\n  {%- set ns.lines = ns.lines
+            + ['\U0001F449 ' + a_desc] -%}\n{%- endif -%} {%- set time_str = '\U0001F552
+            ' + now().strftime('%H:%M:%S') + ' ' + days[now().weekday()] + ' Ngày
+            ' + now().strftime('%d') + ' Tháng ' + now().strftime('%m') + ' Năm '
+            + now().strftime('%Y') + (' ' + notification_time if notification_time
+            != '' else '') -%} {%- set ns.lines = ns.lines + [time_str] -%} {{ ns.lines
+            | join('\\n') }}"
+      - if:
+        - condition: template
+          value_template: "{% set h_count = humans_detected_report.data.get('humans_detected',
+            0) | int(0) %} {% set h_desc  = humans_detected_report.data.get('humans_detected_description',
+            '') | lower %} {% set a_count = humans_detected_report.data.get('animals_detected',
+            0) | int(0) %} {% set a_desc  = humans_detected_report.data.get('animals_detected_description',
+            '') | lower %}\n{# Xác định có người hợp lệ không #} {% set no_human_phrases
+            = [\n  'không có người trong chuỗi ảnh khi so sánh',\n  'không có người',\n
+            \ 'không có chuỗi hình ảnh nào được cung cấp',\n  'không phân tích người'\n]
+            %} {% set human_invalid = namespace(value=false) %} {% for phrase in no_human_phrases
+            %}\n  {% if phrase in h_desc %}{% set human_invalid.value = true %}{%
+            endif %}\n{% endfor %} {% set human_ok = (h_count > 0) and not human_invalid.value
+            %}\n{# Xác định có động vật hợp lệ không #} {% set no_animal_phrases =
+            [\n  'không có động vật trong chuỗi ảnh khi so sánh',\n  'không có động
+            vật',\n  'không phân tích động vật'\n] %} {% set animal_invalid = namespace(value=false)
+            %} {% for phrase in no_animal_phrases %}\n  {% if phrase in a_desc %}{%
+            set animal_invalid.value = true %}{% endif %}\n{% endfor %} {% set animal_ok
+            = (a_count > 0) and not animal_invalid.value %}\n{# Quyết định gửi thông
+            báo theo detect_subjects #} {% if detect_subjects == 'humans' %}\n  {{
+            human_ok }}\n{% elif detect_subjects == 'animals' %}\n  {{ animal_ok }}\n{%
+            else %}\n  {{ human_ok or animal_ok }}\n{% endif %}\n"
+        then:
+        - if:
+          - condition: template
+            value_template: '{{ include_notify and (filtered_devices | length > 0)
+              }}'
+          then:
+          - choose:
+            - alias: Android - Bước 2 gửi kết quả AI
+              conditions:
+              - '{{ is_ios_android == ''android_device'' }}'
+              sequence:
+              - repeat:
+                  for_each: '{{ filtered_devices }}'
+                  sequence:
+                  - continue_on_error: true
+                    action: 'notify.mobile_app_{{ device_attr(repeat.item, ''name'')
+                      | slugify }}
+
+                      '
+                    data:
+                      title: !input notify_title
+                      message: '{{ ai_messages }}'
+                      data:
+                        priority: high
+                        notification_icon: !input status_bar_icon
+                        color: '{{ notification_color_hex }}'
+                        url: '{{ tap_navigate }}'
+                        clickAction: '{{ tap_navigate }}'
+                        tag: '{{ tag }}_text'
+            - alias: iOS - Bước 2 gửi kết quả AI
+              conditions:
+              - '{{ is_ios_android == ''ios_device'' }}'
+              sequence:
+              - repeat:
+                  for_each: '{{ filtered_devices }}'
+                  sequence:
+                  - continue_on_error: true
+                    action: 'notify.mobile_app_{{ device_attr(repeat.item, ''name'')
+                      | slugify }}
+
+                      '
+                    data:
+                      title: !input notify_title
+                      message: '{{ ai_messages }}'
+                      data:
+                        tag: '{{ tag }}_text'
+        - if:
+          - condition: template
+            value_template: '{{ include_telegram_notify }}'
+          then:
+          - continue_on_error: true
+            action: telegram_bot.send_message
+            data: "{% set data = {\n  'config_entry_id': telegram_config_entry,\n
+              \ 'message': ai_messages,\n  'parse_mode': 'plain_text'\n} %} {% if
+              telegram_target != \"\" %}\n  {% set data = dict(data, chat_id=telegram_target
+              | int) %}\n{% endif %} {% if telegram_thread_id != \"\" %}\n  {% set
+              data = dict(data, message_thread_id=telegram_thread_id | int) %}\n{%
+              endif %} {{ data }}\n"
+        - choose:
+          - conditions:
+            - condition: template
+              value_template: '{{ enable_zalo_bot }}'
+            sequence:
+            - alias: Gửi kết quả AI qua Zalo Bot
+              continue_on_error: true
+              action: pyscript.send_zalo_message
+              data:
+                chat_id: '{{ zalo_bot_chat_id }}'
+                message: '{{ ai_messages }}'
+              response_variable: zalo_bot_message_response
+        - choose:
+          - conditions:
+            - condition: template
+              value_template: "{{ enable_zalo_custom\n   and zalo_resolved_id | trim
+                | length > 0\n   and zalo_custom_account | length > 0 }}\n"
+            sequence:
+            - alias: Gửi kết quả AI qua Zalo Custom
+              continue_on_error: true
+              action: zalo_bot.send_message
+              data:
+                account_selection: !input zalo_custom_account
+                thread_id: '{{ zalo_resolved_id | trim | string }}'
+                type: !input zalo_custom_receiver_type
+                message: '{{ ai_messages }}'
+                ttl: !input zalo_custom_ttl
+              response_variable: zalo_custom_message_response
+        - if:
+          - condition: template
+            value_template: '{{ include_tts_announcement }}'
+          then:
+          - alias: TTS ra từng loa
+            repeat:
+              for_each: '{{ media_player }}'
+              sequence:
+              - continue_on_error: true
+                action: media_player.volume_set
+                data:
+                  volume_level: '{{ num_volume_speaker }}'
+                target:
+                  entity_id: '{{ repeat.item }}'
+              - continue_on_error: true
+                action: tts.speak
+                target:
+                  entity_id: !input text_to_speech_engine
+                data:
+                  media_player_entity_id: '{{ repeat.item }}'
+                  message: "{% set h_count = humans_detected_report.data.get('humans_detected',
+                    0) | int(0) %} {% set a_count = humans_detected_report.data.get('animals_detected',
+                    0) | int(0) %} {% set parts = [] %} {% if detect_subjects in ['humans',
+                    'both'] and h_count > 0 %}\n  {% set parts = parts + [humans_detected_report.data.get('humans_detected_description',
+                    '')] %}\n{% endif %} {% if detect_subjects in ['animals', 'both']
+                    and a_count > 0 %}\n  {% set parts = parts + [humans_detected_report.data.get('animals_detected_description',
+                    '')] %}\n{% endif %} {{ parts | join('. ') if parts | length >
+                    0 else 'Phát hiện chuyển động.' }}\n"
+      else:
+      - variables:
+          error_message: "⚠️ AI phân tích ảnh chụp không thành công (timeout). \U0001F552
+            {{ now().strftime('%H:%M:%S %a, %d-%b-%Y') }}\n"
+      - if:
+        - condition: template
+          value_template: '{{ include_notify and (filtered_devices | length > 0) }}'
+        then:
+        - choose:
+          - alias: Android - Thông báo lỗi AI timeout (chỉ text)
+            conditions:
+            - '{{ is_ios_android == ''android_device'' }}'
+            sequence:
+            - repeat:
+                for_each: '{{ filtered_devices }}'
+                sequence:
+                - continue_on_error: true
+                  action: 'notify.mobile_app_{{ device_attr(repeat.item, ''name'')
+                    | slugify }}
+
+                    '
+                  data:
+                    title: !input notify_title
+                    message: '{{ error_message }}'
+                    data:
+                      priority: high
+                      notification_icon: !input status_bar_icon
+                      color: '{{ notification_color_hex }}'
+                      url: '{{ tap_navigate }}'
+                      clickAction: '{{ tap_navigate }}'
+                      tag: '{{ tag }}_text'
+          - alias: iOS - Thông báo lỗi AI timeout (chỉ text)
+            conditions:
+            - '{{ is_ios_android == ''ios_device'' }}'
+            sequence:
+            - repeat:
+                for_each: '{{ filtered_devices }}'
+                sequence:
+                - continue_on_error: true
+                  action: 'notify.mobile_app_{{ device_attr(repeat.item, ''name'')
+                    | slugify }}
+
+                    '
+                  data:
+                    title: !input notify_title
+                    message: '{{ error_message }}'
+                    data:
+                      tag: '{{ tag }}_text'
+      - if:
+        - condition: template
+          value_template: '{{ include_telegram_notify }}'
+        then:
+        - continue_on_error: true
+          action: telegram_bot.send_message
+          data: "{% set data = {\n  'config_entry_id': telegram_config_entry,\n  'message':
+            error_message,\n  'parse_mode': 'plain_text'\n} %} {% if telegram_target
+            != \"\" %}\n  {% set data = dict(data, chat_id=telegram_target | int)
+            %}\n{% endif %} {% if telegram_thread_id != \"\" %}\n  {% set data = dict(data,
+            message_thread_id=telegram_thread_id | int) %}\n{% endif %} {{ data }}\n"
+      - choose:
+        - conditions:
+          - condition: template
+            value_template: '{{ enable_zalo_bot }}'
+          sequence:
+          - continue_on_error: true
+            action: pyscript.send_zalo_message
+            data:
+              chat_id: '{{ zalo_bot_chat_id }}'
+              message: '{{ error_message }}'
+      - choose:
+        - conditions:
+          - condition: template
+            value_template: "{{ enable_zalo_custom\n   and zalo_resolved_id | trim
+              | length > 0\n   and zalo_custom_account | length > 0 }}\n"
+          sequence:
+          - continue_on_error: true
+            action: zalo_bot.send_message
+            data:
+              account_selection: !input zalo_custom_account
+              thread_id: '{{ zalo_resolved_id | trim | string }}'
+              type: !input zalo_custom_receiver_type
+              message: '{{ error_message }}'
+              ttl: !input zalo_custom_ttl
+- delay:
+    seconds: '{{ num_delay_actions }}'
+- alias: Xoa anh snapshot cua lan chay nay sau khi da xu ly xong
+  continue_on_error: true
+  action: shell_command.delete_ai_camera_snapshots
+  data:
+    file_prefix: '{{ file_path_dynamic }}'
+- alias: Don dep anh snapshot cu hon 10 phut de tranh day dung luong
+  continue_on_error: true
+  action: shell_command.cleanup_old_ai_camera_snapshots
+- delay: !input cooldown
+conditions:
+- condition: and
+  conditions: !input run_conditions
